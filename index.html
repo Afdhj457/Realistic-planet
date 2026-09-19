@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>写实行星 · 颜色调节版</title>
+    <style>
+        :root { --accent: #00e5ff; }
+        body { 
+            margin: 0; background: #000; color: #fff; 
+            font-family: -apple-system, system-ui, sans-serif; 
+            overflow: hidden; height: 100dvh;
+        }
+
+        #app { width: 100vw; height: 100dvh; position: relative; }
+        canvas { width: 100%; height: 100%; display: block; }
+
+        /* 悬浮控制面板 - 加宽以容纳颜色选择器 */
+        #ui-panel {
+            position: absolute; 
+            bottom: 40px; left: 20px;
+            width: 310px;
+            background: rgba(25, 25, 25, 0.75);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 15px;
+            box-sizing: border-box; z-index: 90;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            touch-action: none;
+            user-select: none;
+            max-height: 80dvh;
+            overflow-y: auto;
+            scrollbar-width: none;
+            transition: transform 0.25s ease, opacity 0.25s ease;
+        }
+        #ui-panel::-webkit-scrollbar { display: none; }
+
+        /* 面板关闭状态 */
+        #ui-panel.collapsed {
+            transform: translateY(calc(100% + 20px));
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* 面板关闭按钮 */
+        .panel-close {
+            position: absolute;
+            top: 10px; right: 12px;
+            width: 28px; height: 28px;
+            background: rgba(255,255,255,0.1);
+            border: none; border-radius: 50%;
+            color: #fff; font-size: 16px; line-height: 1;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 10;
+            transition: background 0.2s, transform 0.15s;
+            touch-action: manipulation;
+        }
+        .panel-close:active { background: var(--accent); color: #000; transform: scale(0.9); }
+
+        /* 面板打开按钮（浮钮） */
+        #panel-open-fab {
+            position: absolute;
+            bottom: 40px; left: 20px;
+            width: 48px; height: 48px;
+            background: rgba(25,25,25,0.8);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 50%;
+            color: var(--accent); font-size: 22px;
+            display: none; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 95;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            transition: transform 0.15s, background 0.2s;
+            touch-action: manipulation;
+        }
+        #panel-open-fab:active { transform: scale(0.92); background: var(--accent); color: #000; }
+        #panel-open-fab.visible { display: flex; }
+
+        .drag-handle {
+            width: 40px; height: 4px; background: rgba(255,255,255,0.2);
+            margin: -5px auto 10px; border-radius: 2px;
+            position: sticky; top: 0; z-index: 2;
+        }
+
+        .seed-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: flex-end; }
+        .seed-row .item { flex: 1; }
+        .btn-rand { 
+            height: 36px; padding: 0 12px; background: #444; color: #fff;
+            border: none; border-radius: 8px; font-size: 12px; font-weight: bold;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        .btn-rand:active { background: var(--accent); color: #000; }
+
+        .control-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .item { display: flex; flex-direction: column; }
+        label { font-size: 9px; color: #aaa; margin-bottom: 4px; text-transform: uppercase; pointer-events: none; }
+
+        input[type="range"] { -webkit-appearance: none; width: 100%; height: 4px; background: #333; border-radius: 2px; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 18px; height: 18px; background: var(--accent); border-radius: 50%;
+            box-shadow: 0 0 8px rgba(0,229,255,0.6);
+        }
+
+        input[type="number"] {
+            width: 100%; background: #111; border: 1px solid #333; color: var(--accent); 
+            padding: 8px; border-radius: 6px; font-size: 13px; box-sizing: border-box;
+        }
+
+        /* 颜色调节区域 */
+        .color-section {
+            margin-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding-top: 12px;
+        }
+        .color-section .title {
+            font-size: 9px;
+            color: #aaa;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .color-section .title .reset-colors {
+            font-size: 9px;
+            color: var(--accent);
+            cursor: pointer;
+            text-transform: none;
+        }
+        .color-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .color-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 6px 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .color-item:active { background: rgba(255,255,255,0.1); }
+        .color-item .swatch {
+            width: 26px; height: 26px;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.15);
+            flex-shrink: 0;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.15s;
+        }
+        .color-item:active .swatch { transform: scale(0.9); }
+        .color-item .swatch-label {
+            font-size: 10px;
+            color: #ccc;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .color-item input[type="color"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            cursor: pointer;
+            border: none;
+            padding: 0;
+        }
+
+        /* 悬浮导出按钮 */
+        #export-fab {
+            position: absolute;
+            right: 20px; top: 40px;
+            width: 56px; height: 56px;
+            background: var(--accent); color: #000;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 900; line-height: 1.2; text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 229, 255, 0.4);
+            cursor: move; touch-action: none; z-index: 1000;
+            transition: transform 0.1s;
+        }
+        #export-fab:active { transform: scale(0.95); }
+
+        #toast {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: var(--accent); color: #000; padding: 8px 16px;
+            border-radius: 20px; font-size: 11px; font-weight: bold;
+            display: none; z-index: 1100; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+<div id="toast">⏳ 高清 2K 渲染中...</div>
+
+<div id="app">
+    <div id="export-fab">导出<br>2K</div>
+
+    <!-- 面板打开按钮（浮钮，初始隐藏） -->
+    <div id="panel-open-fab" title="打开控制面板">☰</div>
+
+    <div id="ui-panel">
+        <button class="panel-close" id="panelCloseBtn" title="关闭面板">✕</button>
+        <div class="drag-handle"></div>
+        <div class="seed-row">
+            <div class="item">
+                <label>星球种子 SEED</label>
+                <input type="number" id="seedIn" value="123456" step="1">
+            </div>
+            <button class="btn-rand" id="randBtn">随机</button>
+        </div>
+
+        <div class="control-group">
+            <div class="item"><label>海平面</label><input type="range" id="seaIn" min="20" max="80" value="48"></div>
+            <div class="item"><label>云量</label><input type="range" id="cloudIn" min="0" max="100" value="45"></div>
+            <div class="item"><label>北极</label><input type="range" id="iceNIn" min="0" max="100" value="28"></div>
+            <div class="item"><label>南极</label><input type="range" id="iceSIn" min="0" max="100" value="32"></div>
+        </div>
+
+        <!-- 颜色调节区域 -->
+        <div class="color-section">
+            <div class="title">
+                <span>🎨 颜色调节</span>
+                <span class="reset-colors" id="resetColorsBtn">恢复默认</span>
+            </div>
+            <div class="color-grid">
+                <div class="color-item" title="浅海颜色">
+                    <div class="swatch" id="swatchShallow">
+                        <input type="color" id="colorShallow" value="#0d1f47">
+                    </div>
+                    <span class="swatch-label">浅海</span>
+                </div>
+                <div class="color-item" title="深海颜色">
+                    <div class="swatch" id="swatchDeep">
+                        <input type="color" id="colorDeep" value="#030814">
+                    </div>
+                    <span class="swatch-label">深海</span>
+                </div>
+                <div class="color-item" title="沙漠颜色">
+                    <div class="swatch" id="swatchDesert">
+                        <input type="color" id="colorDesert" value="#cca673">
+                    </div>
+                    <span class="swatch-label">沙漠</span>
+                </div>
+                <div class="color-item" title="植被颜色">
+                    <div class="swatch" id="swatchForest">
+                        <input type="color" id="colorForest" value="#14401a">
+                    </div>
+                    <span class="swatch-label">植被</span>
+                </div>
+                <div class="color-item" title="极地冰盖颜色">
+                    <div class="swatch" id="swatchIce">
+                        <input type="color" id="colorIce" value="#e6f2ff">
+                    </div>
+                    <span class="swatch-label">极地</span>
+                </div>
+                <div class="color-item" title="云层颜色">
+                    <div class="swatch" id="swatchCloud">
+                        <input type="color" id="colorCloud" value="#ffffff">
+                    </div>
+                    <span class="swatch-label">云层</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+    import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+
+    // --- 通用拖拽函数 ---
+    function setupDraggable(el, handleSelector = null) {
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        let isTouch = false;
+
+        const getClientX = (e) => e.touches ? e.touches[0].clientX : e.clientX;
+        const getClientY = (e) => e.touches ? e.touches[0].clientY : e.clientY;
+
+        const startDrag = (e) => {
+            // 如果点击的是面板关闭按钮、颜色项或输入元素，不触发拖拽
+            if (e.target.closest('.panel-close') || e.target.closest('.color-item') || 
+                e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') {
+                return;
+            }
+            if (handleSelector && !e.target.closest(handleSelector)) return;
+
+            isDragging = true;
+            isTouch = !!e.touches;
+            startX = getClientX(e);
+            startY = getClientY(e);
+            initialLeft = el.offsetLeft;
+            initialTop = el.offsetTop;
+            el.style.transition = 'none';
+
+            if (isTouch) e.preventDefault();
+        };
+
+        const onMove = (e) => {
+            if (!isDragging) return;
+            const clientX = getClientX(e);
+            const clientY = getClientY(e);
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+
+            let newLeft = initialLeft + dx;
+            let newTop = initialTop + dy;
+
+            const maxLeft = window.innerWidth - el.offsetWidth - 10;
+            const maxTop = window.innerHeight - el.offsetHeight - 10;
+            newLeft = Math.max(10, Math.min(newLeft, maxLeft));
+            newTop = Math.max(10, Math.min(newTop, maxTop));
+
+            el.style.left = newLeft + 'px';
+            el.style.top = newTop + 'px';
+            el.style.bottom = 'auto';
+            el.style.right = 'auto';
+
+            if (isTouch) e.preventDefault();
+        };
+
+        const endDrag = () => {
+            isDragging = false;
+        };
+
+        el.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', endDrag);
+
+        el.addEventListener('touchstart', startDrag, { passive: false });
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', endDrag);
+        document.addEventListener('touchcancel', endDrag);
+    }
+
+    setupDraggable(document.getElementById('ui-panel'));
+    setupDraggable(document.getElementById('export-fab'));
+
+    // --- 面板关闭/打开逻辑 ---
+    const uiPanel = document.getElementById('ui-panel');
+    const panelCloseBtn = document.getElementById('panelCloseBtn');
+    const panelOpenFab = document.getElementById('panel-open-fab');
+
+    panelCloseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        uiPanel.classList.add('collapsed');
+        panelOpenFab.classList.add('visible');
+    });
+
+    panelOpenFab.addEventListener('click', () => {
+        uiPanel.classList.remove('collapsed');
+        panelOpenFab.classList.remove('visible');
+    });
+
+    // --- 噪声与行星核心逻辑 ---
+    const noiseLib = `
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        float snoise(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0); const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i = floor(v + dot(v, C.yyy)); vec3 x0 = v - i + dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz); vec3 l = 1.0 - g;
+            vec3 i1 = min(g.xyz, l.zxy); vec3 i2 = max(g.xyz, l.zxy);
+            vec3 x1 = x0 - i1 + C.xxx; vec3 x2 = x0 - i2 + C.yyy; vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+            vec4 j = p - 49.0 * floor(p * (1.0/49.0));
+            vec4 x_ = floor(j * (1.0/7.0)); vec4 y_ = floor(j - 7.0 * x_);
+            vec4 x = x_ * (2.0/7.0) - 1.0; vec4 y = y_ * (2.0/7.0) - 1.0;
+            vec4 h = 1.0 - abs(x) - abs(y); vec4 b0 = vec4(x.xy, y.xy); vec4 b1 = vec4(x.zw, y.zw);
+            vec4 s0 = floor(b0)*2.0 + 1.0; vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy; vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+            vec3 p0 = vec3(a0.xy, h.x); vec3 p1 = vec3(a0.zw, h.y); vec3 p2 = vec3(a1.xy, h.z); vec3 p3 = vec3(a1.zw, h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+            p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m; return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+        }
+        float fbm(vec3 p, int oct) {
+            float v = 0.0; float amp = 0.5;
+            for (int i=0; i<8; i++) { if(i >= oct) break; v += amp * snoise(p); p *= 2.15; amp *= 0.5; }
+            return v;
+        }
+    `;
+
+    // 核心逻辑：现在接收颜色uniform
+    const corePlanetLogic = `
+        uniform vec3 uColorShallow;
+        uniform vec3 uColorDeep;
+        uniform vec3 uColorDesert;
+        uniform vec3 uColorForest;
+        uniform vec3 uColorIce;
+
+        vec3 getPlanetColor(vec3 p, float uSeed, float uSeaLevel, float uIceN, float uIceS) {
+            vec3 sOff = vec3(uSeed * 0.17, uSeed * 0.43, uSeed * 0.81);
+            float h = fbm(p * 1.6 + sOff, 8) * 0.5 + 0.5;
+            float moisture = fbm(p * 2.3 + sOff + 200.0, 5) * 0.5 + 0.5;
+            float detail = snoise(p * 55.0 + sOff) * 0.04; 
+            vec3 col;
+            bool isWater = h < uSeaLevel;
+            if(isWater) {
+                float d = (uSeaLevel - h) / uSeaLevel;
+                col = mix(uColorShallow, uColorDeep, smoothstep(0.0, 0.7, d));
+            } else {
+                float relH = (h - uSeaLevel) / (1.0 - uSeaLevel);
+                // 使用颜色uniform替代硬编码颜色
+                vec3 plain = mix(uColorDesert, uColorForest, 0.5);
+                vec3 bio = mix(uColorDesert, plain, smoothstep(0.42, 0.48, moisture + detail));
+                bio = mix(bio, uColorForest, smoothstep(0.72, 0.78, moisture + detail));
+                col = mix(bio, vec3(0.35, 0.3, 0.28), smoothstep(0.4, 0.85, relH + detail));
+            }
+            float lat = p.y;
+            float iceField = snoise(p * 8.0 + sOff * 0.5) * 0.08 + snoise(p * 35.0) * 0.03;
+            float nLim = 1.15 - (uIceN/100.0) + iceField;
+            float sLim = -1.15 + (uIceS/100.0) - iceField;
+            float iceMask = 0.0;
+            if(lat > nLim) iceMask = smoothstep(nLim, nLim + 0.06, lat);
+            if(lat < sLim) iceMask = smoothstep(sLim, sLim - 0.06, lat);
+            // 使用极地颜色uniform，并根据水深/陆地调整明度
+            vec3 iceColor = isWater ? uColorIce * 0.9 : uColorIce * (0.95 + detail * 1.5);
+            return mix(col, iceColor, iceMask);
+        }
+    `;
+
+    // --- 初始化场景 ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 15;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('app').appendChild(renderer.domElement);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enablePan = false;
+    controls.rotateSpeed = 0.8;
+    controls.minDistance = 8;
+    controls.maxDistance = 25;
+
+    const sunDir = new THREE.Vector3(1, 0.5, 0.8).normalize();
+
+    // 颜色默认值
+    const DEFAULT_COLORS = {
+        shallow: '#0d1f47',
+        deep: '#030814',
+        desert: '#cca673',
+        forest: '#14401a',
+        ice: '#e6f2ff',
+        cloud: '#ffffff'
+    };
+
+    // 当前颜色值（THREE.Color对象）
+    const currentColors = {
+        shallow: new THREE.Color(DEFAULT_COLORS.shallow),
+        deep: new THREE.Color(DEFAULT_COLORS.deep),
+        desert: new THREE.Color(DEFAULT_COLORS.desert),
+        forest: new THREE.Color(DEFAULT_COLORS.forest),
+        ice: new THREE.Color(DEFAULT_COLORS.ice),
+        cloud: new THREE.Color(DEFAULT_COLORS.cloud)
+    };
+
+    // 行星材质 - 传入颜色uniform
+    const planetMat = new THREE.ShaderMaterial({
+        uniforms: { 
+            uSeed: { value: 123456 }, 
+            uSeaLevel: { value: 0.48 }, 
+            uIceN: { value: 28 }, 
+            uIceS: { value: 32 }, 
+            uSunDir: { value: sunDir },
+            uColorShallow: { value: currentColors.shallow },
+            uColorDeep: { value: currentColors.deep },
+            uColorDesert: { value: currentColors.desert },
+            uColorForest: { value: currentColors.forest },
+            uColorIce: { value: currentColors.ice }
+        },
+        vertexShader: `
+            varying vec3 vNormal, vPos; 
+            void main() { 
+                vNormal = normalize(normalMatrix * normal); 
+                vPos = position; 
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); 
+            }`,
+        fragmentShader: `${noiseLib} ${corePlanetLogic}
+            varying vec3 vNormal, vPos; 
+            uniform float uSeed, uSeaLevel, uIceN, uIceS; 
+            uniform vec3 uSunDir;
+            void main() {
+                vec3 col = getPlanetColor(normalize(vPos), uSeed, uSeaLevel, uIceN, uIceS);
+                float light = max(dot(vNormal, uSunDir), 0.0) + 0.15;
+                gl_FragColor = vec4(col * light, 1.0);
+            }`
+    });
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(5, 128, 128), planetMat));
+
+    // 云层材质 - 传入云颜色uniform
+    const cloudMat = new THREE.ShaderMaterial({
+        uniforms: { 
+            uSeed: { value: 123456 }, 
+            uTime: { value: 0 }, 
+            uCloud: { value: 0.45 }, 
+            uSunDir: { value: sunDir },
+            uColorCloud: { value: currentColors.cloud }
+        },
+        vertexShader: `
+            varying vec3 vNormal, vPos; 
+            void main() { 
+                vNormal = normalize(normalMatrix * normal); 
+                vPos = position; 
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position * 1.02, 1.0); 
+            }`,
+        fragmentShader: `${noiseLib}
+            varying vec3 vNormal, vPos; 
+            uniform float uSeed, uTime, uCloud; 
+            uniform vec3 uSunDir;
+            uniform vec3 uColorCloud;
+            void main() {
+                float n = fbm(normalize(vPos) * 1.2 + uTime * 0.005 + uSeed + 888.0, 5) * 0.5 + 0.5;
+                float alpha = smoothstep(1.0 - uCloud, 1.2 - uCloud, n);
+                float light = max(dot(vNormal, uSunDir), 0.0) + 0.2;
+                gl_FragColor = vec4(uColorCloud * light, alpha * 0.7);
+            }`,
+        transparent: true, 
+        depthWrite: false
+    });
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(5, 128, 128), cloudMat));
+
+    // --- UI 绑定与同步 ---
+    const uiElements = { 
+        seed: document.getElementById('seedIn'), 
+        sea: document.getElementById('seaIn'), 
+        cloud: document.getElementById('cloudIn'), 
+        iceN: document.getElementById('iceNIn'), 
+        iceS: document.getElementById('iceSIn') 
+    };
+
+    const sync = () => {
+        const s = parseFloat(uiElements.seed.value) || 0;
+        planetMat.uniforms.uSeed.value = s; 
+        cloudMat.uniforms.uSeed.value = s + 555;
+        planetMat.uniforms.uSeaLevel.value = uiElements.sea.value / 100; 
+        cloudMat.uniforms.uCloud.value = uiElements.cloud.value / 100;
+        planetMat.uniforms.uIceN.value = uiElements.iceN.value; 
+        planetMat.uniforms.uIceS.value = uiElements.iceS.value;
+    };
+
+    Object.values(uiElements).forEach(el => el.addEventListener('input', sync));
+
+    document.getElementById('randBtn').onclick = () => { 
+        uiElements.seed.value = Math.floor(Math.random() * 999999); 
+        uiElements.sea.value = 30 + Math.floor(Math.random() * 40);
+        uiElements.cloud.value = 20 + Math.floor(Math.random() * 60);
+        uiElements.iceN.value = Math.floor(Math.random() * 60);
+        uiElements.iceS.value = Math.floor(Math.random() * 60);
+        sync(); 
+    };
+
+    // 初始化同步
+    sync();
+
+    // --- 颜色调节绑定 ---
+    const colorInputs = {
+        shallow: document.getElementById('colorShallow'),
+        deep: document.getElementById('colorDeep'),
+        desert: document.getElementById('colorDesert'),
+        forest: document.getElementById('colorForest'),
+        ice: document.getElementById('colorIce'),
+        cloud: document.getElementById('colorCloud')
+    };
+
+    // 更新色块预览
+    function updateSwatch(swatchId, hexColor) {
+        const swatch = document.getElementById(swatchId);
+        if (swatch) {
+            swatch.style.background = hexColor;
+        }
+    }
+
+    // 初始化所有色块
+    updateSwatch('swatchShallow', DEFAULT_COLORS.shallow);
+    updateSwatch('swatchDeep', DEFAULT_COLORS.deep);
+    updateSwatch('swatchDesert', DEFAULT_COLORS.desert);
+    updateSwatch('swatchForest', DEFAULT_COLORS.forest);
+    updateSwatch('swatchIce', DEFAULT_COLORS.ice);
+    updateSwatch('swatchCloud', DEFAULT_COLORS.cloud);
+
+    // 颜色变化时更新材质uniform和色块
+    colorInputs.shallow.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.shallow.set(hex);
+        planetMat.uniforms.uColorShallow.value.copy(currentColors.shallow);
+        updateSwatch('swatchShallow', hex);
+    });
+    colorInputs.deep.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.deep.set(hex);
+        planetMat.uniforms.uColorDeep.value.copy(currentColors.deep);
+        updateSwatch('swatchDeep', hex);
+    });
+    colorInputs.desert.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.desert.set(hex);
+        planetMat.uniforms.uColorDesert.value.copy(currentColors.desert);
+        updateSwatch('swatchDesert', hex);
+    });
+    colorInputs.forest.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.forest.set(hex);
+        planetMat.uniforms.uColorForest.value.copy(currentColors.forest);
+        updateSwatch('swatchForest', hex);
+    });
+    colorInputs.ice.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.ice.set(hex);
+        planetMat.uniforms.uColorIce.value.copy(currentColors.ice);
+        updateSwatch('swatchIce', hex);
+    });
+    colorInputs.cloud.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        currentColors.cloud.set(hex);
+        cloudMat.uniforms.uColorCloud.value.copy(currentColors.cloud);
+        updateSwatch('swatchCloud', hex);
+    });
+
+    // 恢复默认颜色
+    document.getElementById('resetColorsBtn').addEventListener('click', () => {
+        colorInputs.shallow.value = DEFAULT_COLORS.shallow;
+        colorInputs.deep.value = DEFAULT_COLORS.deep;
+        colorInputs.desert.value = DEFAULT_COLORS.desert;
+        colorInputs.forest.value = DEFAULT_COLORS.forest;
+        colorInputs.ice.value = DEFAULT_COLORS.ice;
+        colorInputs.cloud.value = DEFAULT_COLORS.cloud;
+
+        currentColors.shallow.set(DEFAULT_COLORS.shallow);
+        currentColors.deep.set(DEFAULT_COLORS.deep);
+        currentColors.desert.set(DEFAULT_COLORS.desert);
+        currentColors.forest.set(DEFAULT_COLORS.forest);
+        currentColors.ice.set(DEFAULT_COLORS.ice);
+        currentColors.cloud.set(DEFAULT_COLORS.cloud);
+
+        planetMat.uniforms.uColorShallow.value.copy(currentColors.shallow);
+        planetMat.uniforms.uColorDeep.value.copy(currentColors.deep);
+        planetMat.uniforms.uColorDesert.value.copy(currentColors.desert);
+        planetMat.uniforms.uColorForest.value.copy(currentColors.forest);
+        planetMat.uniforms.uColorIce.value.copy(currentColors.ice);
+        cloudMat.uniforms.uColorCloud.value.copy(currentColors.cloud);
+
+        updateSwatch('swatchShallow', DEFAULT_COLORS.shallow);
+        updateSwatch('swatchDeep', DEFAULT_COLORS.deep);
+        updateSwatch('swatchDesert', DEFAULT_COLORS.desert);
+        updateSwatch('swatchForest', DEFAULT_COLORS.forest);
+        updateSwatch('swatchIce', DEFAULT_COLORS.ice);
+        updateSwatch('swatchCloud', DEFAULT_COLORS.cloud);
+    });
+
+    // --- 导出2K贴图 (包含颜色) ---
+    document.getElementById('export-fab').addEventListener('click', (e) => {
+        if (e.target.closest('#export-fab')) {
+            const toast = document.getElementById('toast');
+            toast.style.display = 'block';
+            toast.textContent = '⏳ 高清 2K 渲染中...';
+
+            setTimeout(() => {
+                try {
+                    const W = 2048, H = 1024;
+                    const rt = new THREE.WebGLRenderTarget(W, H, {
+                        format: THREE.RGBAFormat,
+                        type: THREE.UnsignedByteType,
+                        minFilter: THREE.LinearFilter,
+                        magFilter: THREE.LinearFilter
+                    });
+
+                    const exMat = new THREE.ShaderMaterial({
+                        uniforms: { 
+                            uSeed: { value: planetMat.uniforms.uSeed.value },
+                            uSeaLevel: { value: planetMat.uniforms.uSeaLevel.value },
+                            uIceN: { value: planetMat.uniforms.uIceN.value },
+                            uIceS: { value: planetMat.uniforms.uIceS.value },
+                            uCloud: { value: cloudMat.uniforms.uCloud.value },
+                            uTime: { value: 0.0 },
+                            uColorShallow: { value: currentColors.shallow },
+                            uColorDeep: { value: currentColors.deep },
+                            uColorDesert: { value: currentColors.desert },
+                            uColorForest: { value: currentColors.forest },
+                            uColorIce: { value: currentColors.ice },
+                            uColorCloud: { value: currentColors.cloud }
+                        },
+                        vertexShader: `
+                            varying vec2 vUv; 
+                            void main() { 
+                                vUv = uv; 
+                                gl_Position = vec4(position, 1.0); 
+                            }`,
+                        fragmentShader: `${noiseLib} ${corePlanetLogic}
+                            uniform float uSeed, uSeaLevel, uIceN, uIceS, uCloud, uTime; 
+                            uniform vec3 uColorCloud;
+                            varying vec2 vUv;
+                            void main() {
+                                float lon = (vUv.x * 2.0 - 1.0) * 3.14159265;
+                                float lat = (vUv.y * 2.0 - 1.0) * (3.14159265 / 2.0);
+                                vec3 p = vec3(cos(lat)*sin(lon), sin(lat), cos(lat)*cos(lon));
+                                
+                                vec3 terrain = getPlanetColor(p, uSeed, uSeaLevel, uIceN, uIceS);
+                                float n = fbm(p * 1.2 + uTime * 0.005 + uSeed + 888.0, 5) * 0.5 + 0.5;
+                                float cloudAlpha = smoothstep(1.0 - uCloud, 1.2 - uCloud, n);
+                                
+                                vec3 normal = p;
+                                vec3 lightDir = vec3(1.0, 0.5, 0.8);
+                                float light = max(dot(normal, normalize(lightDir)), 0.2) + 0.15;
+                                
+                                vec3 finalColor = mix(terrain, uColorCloud, cloudAlpha * 0.7);
+                                finalColor *= light;
+                                
+                                gl_FragColor = vec4(finalColor, 1.0);
+                            }`
+                    });
+
+                    const exScene = new THREE.Scene();
+                    const exCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                    exScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), exMat));
+
+                    renderer.setRenderTarget(rt);
+                    renderer.render(exScene, exCam);
+
+                    const pixels = new Uint8Array(W * H * 4);
+                    renderer.readRenderTargetPixels(rt, 0, 0, W, H, pixels);
+
+                    const canvas = document.createElement('canvas'); 
+                    canvas.width = W; 
+                    canvas.height = H;
+                    const ctx = canvas.getContext('2d'); 
+                    const imgData = ctx.createImageData(W, H);
+
+                    for (let y = 0; y < H; y++) {
+                        for (let x = 0; x < W; x++) {
+                            const srcIdx = ((H - 1 - y) * W + x) * 4;
+                            const dstIdx = (y * W + x) * 4;
+                            imgData.data[dstIdx] = pixels[srcIdx];
+                            imgData.data[dstIdx + 1] = pixels[srcIdx + 1];
+                            imgData.data[dstIdx + 2] = pixels[srcIdx + 2];
+                            imgData.data[dstIdx + 3] = pixels[srcIdx + 3];
+                        }
+                    }
+
+                    ctx.putImageData(imgData, 0, 0);
+
+                    const a = document.createElement('a'); 
+                    a.download = `Planet_${uiElements.seed.value}_2K.png`;
+                    a.href = canvas.toDataURL('image/png'); 
+                    a.click();
+
+                    renderer.setRenderTarget(null);
+                    rt.dispose();
+                    exMat.dispose();
+
+                    toast.textContent = '✅ 导出完成！';
+                    setTimeout(() => { toast.style.display = 'none'; }, 1500);
+                } catch (error) {
+                    console.error('导出失败:', error);
+                    toast.textContent = '❌ 导出失败';
+                    setTimeout(() => { toast.style.display = 'none'; }, 1500);
+                }
+            }, 50);
+        }
+    });
+
+    // --- 动画循环 ---
+    function animate() {
+        requestAnimationFrame(animate);
+        cloudMat.uniforms.uTime.value += 0.01;
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    window.onresize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+    };
+
+    animate();
+</script>
+</body>
+</html>
